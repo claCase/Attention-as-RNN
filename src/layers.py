@@ -10,13 +10,16 @@ import numpy as np
 
 
 class AttentionRNNCell(
-    layers.Layer#, DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
+    DropoutRNNCellMixin,
+    tf.keras.__internal__.layers.BaseRandomLayer
 ):
-    def __init__(self, heads, dim, activation, concat_heads=False,**kwargs):
+    def __init__(self, heads, dim, activation, concat_heads=False,dropout=0.1, recurrent_dropout=0.1,**kwargs):
         super().__init__(**kwargs)
         self.heads = heads
         self.concat_heads = concat_heads
         self.dim = dim
+        self.dropout = max(min(dropout, 1), 0)
+        self.recurrent_dropout = max(min(recurrent_dropout, 1), 0)
         self.activation = activations.get(activation)
         self.state_size = [
             tf.TensorShape([heads, dim]),  # h
@@ -38,11 +41,21 @@ class AttentionRNNCell(
             "kvq_kernel", (i, self.heads, self.dim, 3), caching_device=default_caching_device
         )
 
-    def call(self, inputs, states, training):
+    @tf.function
+    def call(self, inputs, states, training=False):
         h, prev_num, prev_den, prev_max = states
         prev_max = tf.squeeze(prev_max, -1)
         prev_den = tf.squeeze(prev_den, -1)
         kvq = tf.einsum("...i,ihok->...hok", inputs, self.kvq_kernel)
+        kvq = self.activation(kvq)
+
+        if self.dropout>0:
+            kvq_drop = self.get_dropout_mask_for_cell(inputs=kvq,training=True, count=1)
+            kvq = kvq * kvq_drop
+        if self.recurrent_dropout>0:
+            h_drop = self.get_recurrent_dropout_mask_for_cell(inputs=h, training=True,count=1)
+            h = h * h_drop
+
         k, v, q = tf.split(kvq, 3, -1)
         k, v, q = tf.squeeze(k, -1), tf.squeeze(v, -1), tf.squeeze(q, -1)
         num, den, cmax = self.recurrence(q, k, v, prev_num, prev_den, prev_max)
@@ -61,12 +74,11 @@ class AttentionRNNCell(
         s = tf.einsum("...q,...q->...", query, key)  # BH
         # Update max for stable soft-max
         curr_max = tf.maximum(prev_max, s)  # BH
-        max_diff = tf.math.exp(prev_max - curr_max)  # BH
+        exp_max_diff = tf.math.exp(prev_max - curr_max)  # BH
         # Subtract max to stabilize 
         sm = tf.math.exp(s - curr_max)  # BH
         # Denominator recurrence 
-        den = prev_den * max_diff + sm  # BH
+        ck = prev_den * exp_max_diff + sm  # BH
         # Numerator recurrence 
-        sv = value * sm[..., None]  # BHO
-        num = prev_num * max_diff[..., None] + sv
-        return num, den, curr_max
+        ak = prev_num * exp_max_diff[..., None] + value * ck[..., None] # BHO
+        return ak, ck, curr_max
