@@ -41,7 +41,7 @@ class AttentionRNNCell(
             "kvq_kernel", (i, self.heads, self.dim, 3), caching_device=default_caching_device
         )
 
-    @tf.function
+    #@tf.function
     def call(self, inputs, states, training=False):
         h, prev_num, prev_den, prev_max = states
         prev_max = tf.squeeze(prev_max, -1)
@@ -70,6 +70,20 @@ class AttentionRNNCell(
         return o, [h, num, den, cmax]
 
     def recurrence(self, query, key, value, prev_num, prev_den, prev_max, cache=None):
+        """Computes softmax recurrence 
+
+        Args:
+            query (tf.Tensor): Tensor of shape (B,H,O)
+            key (tf.Tensor): Tensor of shape (B,H,O)
+            value (tf.Tensor): Tensor of shape (B,H,O)
+            prev_num (tf.Tensor): Tensor of shape (B,H,O)
+            prev_den (tf.Tensor): Tensor of shape (B,H)
+            prev_max (tf.Tensor): Tensor of shape (B,H)
+            cache (tf.Tensor, optional): Cache. Defaults to None.
+
+        Returns:
+            _type_: _description_
+        """
         # Query-Key inner product
         s = tf.einsum("...q,...q->...", query, key)  # BH
         # Update max for stable soft-max
@@ -80,5 +94,5 @@ class AttentionRNNCell(
         # Denominator recurrence 
         ck = prev_den * exp_max_diff + sm  # BH
         # Numerator recurrence 
-        ak = prev_num * exp_max_diff[..., None] + value * ck[..., None] # BHO
+        ak = prev_num * exp_max_diff[..., None] + value * sm[..., None]#tf.math.exp(ck - curr_max)[..., None] # BHO
         return ak, ck, curr_max
