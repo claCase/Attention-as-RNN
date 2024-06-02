@@ -9,11 +9,20 @@ from tensorflow.python.keras.layers.recurrent import (
 import numpy as np
 
 
+
 class AttentionRNNCell(
-    DropoutRNNCellMixin,
-    tf.keras.__internal__.layers.BaseRandomLayer
+        DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
 ):
-    def __init__(self, heads, dim, activation, concat_heads=False,dropout=0.1, recurrent_dropout=0.1,**kwargs):
+    def __init__(
+        self,
+        heads,
+        dim,
+        activation,
+        concat_heads=False,
+        dropout=0.1,
+        recurrent_dropout=0.1,
+        **kwargs
+    ):
         super().__init__(**kwargs)
         self.heads = heads
         self.concat_heads = concat_heads
@@ -37,31 +46,41 @@ class AttentionRNNCell(
     def build(self, input_shape):
         default_caching_device = _caching_device(self)
         i = input_shape[-1]
-        self.kvq_kernel = self.add_weight(
-            "kvq_kernel", (i, self.heads, self.dim, 3), caching_device=default_caching_device
+        self.kv_kernel = self.add_weight(
+            "kv_kernel",
+            (i, self.heads, self.dim, 2),
+            caching_device=default_caching_device,
+        )
+        self.q_kernel = self.add_weight(
+            "q_kernel", (self.heads, self.dim), caching_device=default_caching_device
         )
 
-    #@tf.function
+    # @tf.function
     def call(self, inputs, states, training=False):
         h, prev_num, prev_den, prev_max = states
         prev_max = tf.squeeze(prev_max, -1)
         prev_den = tf.squeeze(prev_den, -1)
-        kvq = tf.einsum("...i,ihok->...hok", inputs, self.kvq_kernel)
-        kvq = self.activation(kvq)
 
-        if self.dropout>0:
-            kvq_drop = self.get_dropout_mask_for_cell(inputs=kvq,training=True, count=1)
-            kvq = kvq * kvq_drop
-        if self.recurrent_dropout>0:
-            h_drop = self.get_recurrent_dropout_mask_for_cell(inputs=h, training=True,count=1)
-            h = h * h_drop
+        q = self.q_kernel
+        kv = tf.einsum("...i,ihok->...hok", inputs, self.kv_kernel)
+        kv = self.activation(kv)
 
-        k, v, q = tf.split(kvq, 3, -1)
-        k, v, q = tf.squeeze(k, -1), tf.squeeze(v, -1), tf.squeeze(q, -1)
+        if self.dropout > 0:
+            kv_drop = self.get_dropout_mask_for_cell(inputs=kv, training=True, count=1)
+            kv = kv * kv_drop
+
+        k, v = tf.split(kv, 2, -1)
+        k, v = k[..., 0], v[..., 0]
         num, den, cmax = self.recurrence(q, k, v, prev_num, prev_den, prev_max)
         den = den[..., None]
         cmax = cmax[..., None]
         h = num / den
+        if self.recurrent_dropout > 0:
+            h_drop = self.get_recurrent_dropout_mask_for_cell(
+                inputs=h, training=True, count=1
+            )
+            h = h * h_drop
+
         if self.concat_heads:
             B = tf.shape(h)[0]
             o = tf.reshape(h, (B, -1))
@@ -70,7 +89,7 @@ class AttentionRNNCell(
         return o, [h, num, den, cmax]
 
     def recurrence(self, query, key, value, prev_num, prev_den, prev_max, cache=None):
-        """Computes softmax recurrence 
+        """Computes softmax recurrence
 
         Args:
             query (tf.Tensor): Tensor of shape (B,H,O)
@@ -82,17 +101,19 @@ class AttentionRNNCell(
             cache (tf.Tensor, optional): Cache. Defaults to None.
 
         Returns:
-            _type_: _description_
+            Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:  (numerator, denominator, max)
         """
         # Query-Key inner product
         s = tf.einsum("...q,...q->...", query, key)  # BH
         # Update max for stable soft-max
         curr_max = tf.maximum(prev_max, s)  # BH
         exp_max_diff = tf.math.exp(prev_max - curr_max)  # BH
-        # Subtract max to stabilize 
+        # Subtract max to stabilize
         sm = tf.math.exp(s - curr_max)  # BH
-        # Denominator recurrence 
+        # Denominator recurrence
         ck = prev_den * exp_max_diff + sm  # BH
-        # Numerator recurrence 
-        ak = prev_num * exp_max_diff[..., None] + value * sm[..., None]#tf.math.exp(ck - curr_max)[..., None] # BHO
+        # Numerator recurrence
+        ak = (
+            prev_num * exp_max_diff[..., None] + value * sm[..., None]
+        )  # tf.math.exp(ck - curr_max)[..., None] # BHO
         return ak, ck, curr_max
