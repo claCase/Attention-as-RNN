@@ -25,13 +25,15 @@ history = model.fit(x, x, epochs=EPOCHS, batch_size=BATCH_SIZE)
 
 # Visualize Result 
 o = model(x)
-plt.plot(o[30, :, 0], label="True")
-plt.plot(x[30, :, 0], label="RNN-Attention")
+plt.plot(o[30, :, 0], label="RNN-Attention")
+plt.plot(x[30, :, 0], label="True")
 plt.legend()
 
-plt.plot(history.history["loss"])
+plt.plot(history.history["loss"], label="train loss")
+plt.plot(history.history["val_loss"], label="validation loss")
 plt.ylabel("Loss")
 plt.xlabel("Epochs")
+plt.legend()
 ```
 
 ![](https://github.com/claCase/Attention-as-RNN/blob/main/figures/output.png)
