@@ -116,7 +116,7 @@ class AttentionRNNCell(
         # Numerator recurrence
         ak = (
             prev_num * exp_max_diff[..., None] + value * sm[..., None]
-        )  # tf.math.exp(ck - curr_max)[..., None] # BHO
+        )  # BHO
         return ak, ck, curr_max
 
 
@@ -238,10 +238,11 @@ class ScanAssociativeRNNAttention(layers.Layer):
         shape = tf.shape(inputs)
         B = shape[0]
         T = shape[1]
+
         q = self.q_kernel
         kv = tf.einsum("...i,ihok->...hok", inputs, self.kv_kernel)
         kv = self.activation(kv)
-        kv_drop = self.dropout(kv)
+        kv = self.dropout(kv, training=training)
         k, v = tf.split(kv, 2, -1)
         k, v = k[..., 0], v[..., 0]
 
