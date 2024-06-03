@@ -125,7 +125,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         self,
         heads,
         dim,
-        activation,
+        activation="elu",
         concat_heads=False,
         dropout=0.1,
         **kwargs,
@@ -144,22 +144,6 @@ class ScanAssociativeRNNAttention(layers.Layer):
             shape=(i, self.heads, self.dim, 2),
         )
         self.q_kernel = self.add_weight(name="q_kernel", shape=(self.heads, self.dim))
-
-    @staticmethod
-    def m(s):
-        return tf.reduce_max(s, 1)
-
-    @staticmethod
-    def u(s, m):
-        sm = s - m[:, None]
-        sum_exp_sm = tf.reduce_sum(tf.math.exp(sm), 1)
-        return sum_exp_sm
-
-    @staticmethod
-    def w(s, m, v):
-        sm = s - m[:, None, :]
-        sum_exp = tf.reduce_sum(tf.math.exp(sm)[..., None] * v, 1)
-        return sum_exp
 
     @staticmethod
     def m_aUb(a, b):
