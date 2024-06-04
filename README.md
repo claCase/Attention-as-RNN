@@ -48,3 +48,7 @@ fig, ax = plotter.plot_hist2d(scan_model, x[:1])
 ```
 
 ![](https://github.com/claCase/Attention-as-RNN/blob/main/figures/output_stochastic.png)
+
+# Tensorboard Step-Time Graph 
+
+![](https://github.com/claCase/Attention-as-RNN/blob/main/figures/step_time_graph.png)
