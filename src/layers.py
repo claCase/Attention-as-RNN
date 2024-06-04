@@ -240,7 +240,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
 
         if self.concat_heads:
             B = tf.shape(h)[0]
-            o = tf.reshape(h, (B, -1))
+            o = tf.reshape(h, (B, T, -1))
         else:
             o = tf.reduce_sum(h, -2)
         return o
