@@ -1,5 +1,5 @@
 # Attention-as-RNN
-Non-Official Implementation of https://arxiv.org/pdf/2405.13956 implemented as a recurrent layer and efficient prefix-sum layer. 
+Non-Official Implementation of "Attention as an RNN" from https://arxiv.org/pdf/2405.13956 implemented as a recurrent layer and efficient prefix-sum layer. 
 
 # Usage Example
 
