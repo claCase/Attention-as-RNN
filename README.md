@@ -41,17 +41,10 @@ plt.legend()
 
 
 You can also run the model in training mode, making the output stochasic via dropout and approximating the epistemic uncertainty 
-```python
-N = 30
-S = 20
-for i in range(S):
-    o = model(x, training=True)
-    if i == S-1:
-        plt.plot(o[N, :100, 0], color="blue", label="RNN-Attention")
-    else:
-        plt.plot(o[N, :100, 0], color="blue")
 
-plt.plot(x[N, :100, 0], label="True")
-plt.legend()
+```python
+from src import plotter
+fig, ax = plotter.plot_hist2d(scan_model, x[:1])
 ```
+
 ![](https://github.com/claCase/Attention-as-RNN/blob/main/figures/output_stochastic.png)
