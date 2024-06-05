@@ -2,7 +2,12 @@ from typing import List, Tuple, Union
 import tensorflow as tf
 from tensorflow.keras import models, layers, backend as tfk
 import numpy as np
-from src.layers import AttentionRNNCell, ScanAssociativeRNNAttention
+from src.layers import (
+    Attention,
+    CausalAttentionRNNCell,
+    AttentionRNNCell,
+    ScanAssociativeRNNAttention,
+)
 
 
 class AttentionRNN(models.Model):
@@ -80,3 +85,24 @@ class ScanRNNAttentionModel(models.Model):
 
     def call(self, inputs, training):
         return self.scans(inputs, training)
+
+
+class AttentionModel(models.Model):
+    def __init__(
+        self, heads, dims, activation, output_activation, dropout, causal=True, **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.heads = heads
+        self.dims = dims
+        self.activation = activation
+        attn_layers = [
+            Attention(head, dim, activation, dropout, False, causal)
+            for head, dim in zip(heads[:-1], dims[:-1])
+        ]
+        attn_layers.append(
+            Attention(heads[-1], dims[-1], output_activation, dropout, False, causal)
+        )
+        self.attn = models.Sequential(attn_layers)
+
+    def call(self, inputs, training):
+        return self.attn(inputs, training)

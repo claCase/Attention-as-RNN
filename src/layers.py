@@ -258,3 +258,41 @@ class ScanAssociativeRNNAttention(layers.Layer):
         }
         base_config = super().get_config()
         return dict(list(base_config.items()) + list(config.items()))
+class Attention(layers.Layer):
+    def __init__(self, heads, dims, activation, dropout, return_attention=False, causal=True, **kwargs):
+        super().__init__(**kwargs)
+        self.heads = heads 
+        self.dims = dims 
+        self.activation = activations.get(activation)
+        self.dropout = layers.Dropout(min(max(dropout, 0),1))
+        self.return_attention = return_attention 
+        self.causal = causal 
+
+    def build(self, input_shape):
+        i = input_shape[-1]
+        self.attn_kernel = self.add_weight(
+            name="kvq_kernel", shape=(i, self.heads, self.dims, 3)
+        )
+        self.out_kernel = self.add_weight(
+            name="kvq_kernel", shape=(self.dims, self.heads, self.dims)
+        )
+
+    def call(self, inputs, training):
+        kvq = tf.einsum("bni,ihok->bnhok", inputs, self.attn_kernel)
+        kvq = self.dropout(kvq, training=training)
+
+        k, v, q = tf.split(kvq, 3, -1)
+        k, v, q = k[..., 0], v[..., 0], q[..., 0]
+        qk = tf.einsum("bnho,bkho->bhnk", q, k)
+        d = tf.math.sqrt(tf.cast(self.attn_kernel.shape[0], inputs.dtype))
+        qk_normed = qk / d
+        if self.causal:
+            mask = tf.ones_like(qk_normed)
+            mask = -(1. - tf.linalg.LinearOperatorLowerTriangular(mask).to_dense())*1e10
+            qk_normed = qk_normed + mask 
+        A_soft = tf.nn.softmax(qk_normed)
+        OH = tf.einsum("bhnk,bkho->bnho", A_soft, v)
+        O = tf.einsum("bnhi,iho", OH, self.out_kernel)
+        if self.return_attention:
+            return O, A_soft
+        return O
