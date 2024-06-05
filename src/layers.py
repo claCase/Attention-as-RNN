@@ -164,7 +164,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         m_aub = self.m_aUb(ma, mb)
         ua_exp = ua * tf.math.exp(ma - m_aub)
         ub_exp = ub * tf.math.exp(mb - m_aub)
-        return ub_exp + ub_exp
+        return ua_exp + ub_exp
 
     def w_aUb(self, wa, ma, wb, mb):
         """Union operation for combining numerators
@@ -179,7 +179,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         m_aub = self.m_aUb(ma, mb)
         wa_exp = wa * tf.math.exp(ma - m_aub)
         wb_exp = wb * tf.math.exp(mb - m_aub)
-        return wb_exp + wb_exp
+        return wa_exp + wb_exp
 
     def s(self, q, k):
         return tf.einsum("hd,bthd->bth", q, k)
