@@ -1,6 +1,6 @@
 from tensorflow_probability.python.math import scan_associative
 import tensorflow as tf
-from tensorflow.python.keras import layers, models, activations, losses, backend as tfk
+from tensorflow.keras import layers, models, activations, losses, backend as tfk
 from packaging.version import Version
 
 if Version(tf.__version__) >= Version("2.16.0"):
