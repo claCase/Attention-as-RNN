@@ -1,4 +1,6 @@
-tensorflow[and-cuda]==2.15
-tensorflow-probability==0.23
-maptplotlib
-numpy
+tensorflow[and-cuda]==2.15.*
+tensorboard-plugin-profile==2.15.*
+tensorflow-probability==0.23.*
+matplotlib==3.8.2
+numpy==1.26.2
+scipy==1.12.0
