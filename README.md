@@ -49,6 +49,27 @@ fig, ax = plotter.plot_hist2d(scan_model, x[:1])
 
 ![](https://github.com/claCase/Attention-as-RNN/blob/main/figures/output_stochastic.png)
 
+You can train the model using the pre-fix sum implementation and transfer the weights to the recurrent implementation to make inference recurrentely:
+```python
+config = model.get_config()
+heads = config["heads"]
+dims = config["dims"]
+activation = config["activation"]
+dropout = config["dropout"]
+recurrent_dropout = config["recurrent_dropout"]
+
+rnn_model = models.AttentionRNN(
+    heads,
+    dims,
+    activation=activation,
+    dropout=dropout,
+    recurrent_dropout=recurrent_dropout,
+)
+rnn_model.build(x.shape)
+rnn_model.set_weights(scan_model.get_weights())
+rnn_model.compile("adam", "mse")
+```
+
 # Tensorboard Step-Time Graph 
 
 ![](https://github.com/claCase/Attention-as-RNN/blob/main/figures/step_time_graph.png)
