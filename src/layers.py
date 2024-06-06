@@ -4,7 +4,9 @@ from tensorflow.keras import layers, models, activations, losses, backend as tfk
 from packaging.version import Version
 
 if Version(tf.__version__) >= Version("2.16.0"):
-    from keras.src.layers.rnn.dropout_rnn_cell import DropoutRNNCell as DropCell
+    from tensorflow.keras.src.layers.rnn.dropout_rnn_cell import (
+        DropoutRNNCell as DropCell,
+    )
 else:
     from tensorflow.python.keras.layers.recurrent import DropoutRNNCellMixin as DropCell
 import numpy as np
@@ -19,6 +21,7 @@ class AttentionRNNCell(DropCell, layers.Layer):
         concat_heads=False,
         dropout=0.1,
         recurrent_dropout=0.1,
+        initializer="glorot_uniform",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -28,6 +31,7 @@ class AttentionRNNCell(DropCell, layers.Layer):
         self.dropout = max(min(dropout, 1), 0)
         self.recurrent_dropout = max(min(recurrent_dropout, 1), 0)
         self.activation = activations.get(activation)
+        self.initializer = initializer
         self.state_size = [
             tf.TensorShape([heads, dim]),  # h
             tf.TensorShape([heads]),  # max
@@ -41,10 +45,12 @@ class AttentionRNNCell(DropCell, layers.Layer):
         self.kv_kernel = self.add_weight(
             "kv_kernel",
             shape=(i, self.heads, self.dim, 2),
+            initializer=self.initializer,
         )
         self.q_kernel = self.add_weight(
             "q_kernel",
             shape=(self.heads, self.dim),
+            initializer=self.initializer,
         )
 
     @tf.function
@@ -120,6 +126,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         concat_heads=False,
         dropout=0.1,
         recurrent_dropout=0.01,
+        initializer="glorot_uniform",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -129,14 +136,20 @@ class ScanAssociativeRNNAttention(layers.Layer):
         self.dropout = layers.Dropout(max(min(dropout, 1), 0))
         self.recurrent_dropout = layers.Dropout(max(min(recurrent_dropout, 1), 0))
         self.activation = activations.get(activation)
+        self.initializer = initializer
 
     def build(self, input_shape):
         i = input_shape[-1]
         self.kv_kernel = self.add_weight(
             name="kv_kernel",
             shape=(i, self.heads, self.dim, 2),
+            initializer=self.initializer,
         )
-        self.q_kernel = self.add_weight(name="q_kernel", shape=(self.heads, self.dim))
+        self.q_kernel = self.add_weight(
+            name="q_kernel", 
+            shape=(self.heads, self.dim), 
+            initializer=self.initializer
+        )
 
     @staticmethod
     def m_aUb(a, b):
@@ -164,7 +177,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         m_aub = self.m_aUb(ma, mb)
         ua_exp = ua * tf.math.exp(ma - m_aub)
         ub_exp = ub * tf.math.exp(mb - m_aub)
-        return ub_exp + ub_exp
+        return ua_exp + ub_exp
 
     def w_aUb(self, wa, ma, wb, mb):
         """Union operation for combining numerators
@@ -179,7 +192,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         m_aub = self.m_aUb(ma, mb)
         wa_exp = wa * tf.math.exp(ma - m_aub)
         wb_exp = wb * tf.math.exp(mb - m_aub)
-        return wb_exp + wb_exp
+        return wa_exp + wb_exp
 
     def s(self, q, k):
         return tf.einsum("hd,bthd->bth", q, k)
@@ -231,14 +244,14 @@ class ScanAssociativeRNNAttention(layers.Layer):
         i = tf.concat([st, u_init, v], -1)
         o = scan_associative(self.associate, i, axis=1)
         m, c, a = o[..., :1], o[..., 1:2], o[..., 2:]
-        h = a/c
+        h = a / c
         h = self.recurrent_dropout(h, training=training)
         if self.concat_heads:
             h = tf.reshape(h, (B, T, -1))
         else:
             h = tf.reduce_mean(h, -2)
         return h, m, c, a
-        
+
     def get_config(self):
         config = {
             "dropout": self.dropout,
