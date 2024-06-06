@@ -164,7 +164,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         m_aub = self.m_aUb(ma, mb)
         ua_exp = ua * tf.math.exp(ma - m_aub)
         ub_exp = ub * tf.math.exp(mb - m_aub)
-        return ua_exp + ub_exp
+        return ub_exp + ub_exp
 
     def w_aUb(self, wa, ma, wb, mb):
         """Union operation for combining numerators
@@ -179,7 +179,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         m_aub = self.m_aUb(ma, mb)
         wa_exp = wa * tf.math.exp(ma - m_aub)
         wb_exp = wb * tf.math.exp(mb - m_aub)
-        return wa_exp + wb_exp
+        return wb_exp + wb_exp
 
     def s(self, q, k):
         return tf.einsum("hd,bthd->bth", q, k)
@@ -231,14 +231,14 @@ class ScanAssociativeRNNAttention(layers.Layer):
         i = tf.concat([st, u_init, v], -1)
         o = scan_associative(self.associate, i, axis=1)
         m, c, a = o[..., :1], o[..., 1:2], o[..., 2:]
-        h = a / c
+        h = a/c
         h = self.recurrent_dropout(h, training=training)
         if self.concat_heads:
-            o = tf.reshape(h, (B, T, -1))
+            h = tf.reshape(h, (B, T, -1))
         else:
-            o = tf.reduce_mean(h, -2)
-        return o, m, c, a
-
+            h = tf.reduce_mean(h, -2)
+        return h, m, c, a
+        
     def get_config(self):
         config = {
             "dropout": self.dropout,
