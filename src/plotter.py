@@ -1,3 +1,4 @@
+import tensorflow as tf 
 from scipy.ndimage import gaussian_filter
 import os
 import matplotlib.pyplot as plt
@@ -6,12 +7,13 @@ import numpy as np
 
 def plot_hist2d(model, inputs, samples=200, axis=0, resolution=500,save_path=None):
     assert len(inputs.shape) == 3 and inputs.shape[0] == 1
-
     samples = max(samples, 4)
     Y = []
     for i in range(samples):
         Y.append(model(inputs, training=True).numpy()[0, :, axis])
     Y = np.asarray(Y)
+    if isinstance(inputs, tf.Tensor):
+        inputs = inputs.numpy()
     length = Y.shape[1]
     X = np.linspace(0, 1, length)
     
