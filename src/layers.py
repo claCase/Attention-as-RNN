@@ -49,20 +49,21 @@ class AttentionRNNCell(DropCell, layers.Layer):
 
     @tf.function
     def call(self, inputs, states, training=False):
-        h, prev_max, prev_den, prev_num  = states
+        h, prev_max, prev_den, prev_num = states
 
         q = self.q_kernel
         kv = tf.einsum("...i,ihok->...hok", inputs, self.kv_kernel)
-        #print(kv.numpy().squeeze())
         kv = self.activation(kv)
 
         if self.dropout > 0:
-            kv_drop = self.get_dropout_mask_for_cell(inputs=kv, training=training, count=1)
+            kv_drop = self.get_dropout_mask_for_cell(
+                inputs=kv, training=training, count=1
+            )
             kv = kv * kv_drop
 
         k, v = tf.split(kv, 2, -1)
         k, v = k[..., 0], v[..., 0]
-        
+
         num, den, cmax = self.recurrence(q, k, v, prev_num, prev_den, prev_max)
         h = num / den[..., None]
 
@@ -103,10 +104,9 @@ class AttentionRNNCell(DropCell, layers.Layer):
         # Subtract max to stabilize
         sm = tf.math.exp(s - curr_max)  # BH
         # Denominator recurrence
-        ck = sm + prev_den * exp_max_diff    # BH
+        ck = sm + prev_den * exp_max_diff  # BH
         # Numerator recurrence
-        ak = value * sm[..., None] + prev_num * exp_max_diff[..., None]    # BHO
-        #print(ak, value)
+        ak = value * sm[..., None] + prev_num * exp_max_diff[..., None]  # BHO
         return ak, ck, curr_max
 
 
@@ -224,7 +224,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         kv = self.dropout(kv, training=training)
         k, v = tf.split(kv, 2, -1)
         k, v = k[..., 0], v[..., 0]
-        
+
         # Set up for associative scan (prefix sum)
         st = self.s(q, k)[..., None]  # (B, T, H, 1)
         u_init = tf.ones(shape=(B, T, self.heads, 1))
@@ -236,7 +236,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         if self.concat_heads:
             o = tf.reshape(h, (B, T, -1))
         else:
-            o = tf.reduce_sum(h, -2)
+            o = tf.reduce_mean(h, -2)
         return o, m, c, a
 
     def get_config(self):
@@ -258,15 +258,26 @@ class ScanAssociativeRNNAttention(layers.Layer):
         }
         base_config = super().get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
 class Attention(layers.Layer):
-    def __init__(self, heads, dims, activation, dropout, return_attention=False, causal=True, **kwargs):
+    def __init__(
+        self,
+        heads,
+        dims,
+        activation,
+        dropout,
+        return_attention=False,
+        causal=True,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
-        self.heads = heads 
-        self.dims = dims 
+        self.heads = heads
+        self.dims = dims
         self.activation = activations.get(activation)
-        self.dropout = layers.Dropout(min(max(dropout, 0),1))
-        self.return_attention = return_attention 
-        self.causal = causal 
+        self.dropout = layers.Dropout(min(max(dropout, 0), 1))
+        self.return_attention = return_attention
+        self.causal = causal
 
     def build(self, input_shape):
         i = input_shape[-1]
@@ -277,6 +288,7 @@ class Attention(layers.Layer):
             name="kvq_kernel", shape=(self.dims, self.heads, self.dims)
         )
 
+    @tf.function
     def call(self, inputs, training):
         kvq = tf.einsum("bni,ihok->bnhok", inputs, self.attn_kernel)
         kvq = self.dropout(kvq, training=training)
@@ -288,8 +300,10 @@ class Attention(layers.Layer):
         qk_normed = qk / d
         if self.causal:
             mask = tf.ones_like(qk_normed)
-            mask = -(1. - tf.linalg.LinearOperatorLowerTriangular(mask).to_dense())*1e10
-            qk_normed = qk_normed + mask 
+            mask = (
+                -(1.0 - tf.linalg.LinearOperatorLowerTriangular(mask).to_dense()) * 1e10
+            )
+            qk_normed = qk_normed + mask
         A_soft = tf.nn.softmax(qk_normed)
         OH = tf.einsum("bhnk,bkho->bnho", A_soft, v)
         O = tf.einsum("bnhi,iho", OH, self.out_kernel)

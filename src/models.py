@@ -4,7 +4,6 @@ from tensorflow.keras import models, layers, backend as tfk
 import numpy as np
 from src.layers import (
     Attention,
-    CausalAttentionRNNCell,
     AttentionRNNCell,
     ScanAssociativeRNNAttention,
 )
@@ -17,37 +16,44 @@ class AttentionRNN(models.Model):
         dims: List,
         activation="silu",
         output_activation="linear",
+        concat_heads=False,
         return_sequences=True,
         return_state=False,
         dropout=0.1,
-        recurrent_dropout=0.1,
+        recurrent_dropout=0.01,
+        causal=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.dims = dims
         self.heads = heads
         self.activation = activation
-        stacked = tf.keras.layers.StackedRNNCells(
-            [
-                AttentionRNNCell(h, d, activation, False, dropout, recurrent_dropout)
-                for h, d in zip(heads, dims)
-            ]
+        cell = AttentionRNNCell
+
+        stacked = [
+            cell(h, d, activation, concat_heads, dropout, recurrent_dropout)
+            for h, d in zip(heads[:-1], dims[:-1])
+        ]
+        stacked.append(
+            cell(
+                heads[-1],
+                dims[-1],
+                activation,
+                concat_heads,
+                dropout,
+                recurrent_dropout,
+            )
         )
+        stackedCell = tf.keras.layers.StackedRNNCells(stacked)
         self.rnn = layers.RNN(
-            stacked,
+            stackedCell,
             return_sequences=return_sequences,
             return_state=return_state,
         )
-        self.dense = tf.keras.layers.Dense(dims[-1], output_activation)
 
-    # @tf.function
+    @tf.function
     def call(self, inputs, training):
-        o = self.rnn(inputs, training=training)
-        if self.rnn.return_state is True:
-            o, s = o
-            return self.dense(o), s
-        else:
-            return self.dense(o)
+        return self.rnn(inputs, training=training)
 
 
 class ScanRNNAttentionModel(models.Model):
@@ -59,9 +65,14 @@ class ScanRNNAttentionModel(models.Model):
         output_activation="linear",
         concat_heads=False,
         dropout=0.1,
+        recurrent_dropout=0.01,
         **kwargs,
     ):
         super().__init__()
+        assert len(heads) == len(
+            dims
+        ), f"len of heads and dims must be equal, but are heads:{len(heads)} dims: {len(dims)}"
+
         layers = [
             ScanAssociativeRNNAttention(
                 heads=head,
@@ -69,6 +80,7 @@ class ScanRNNAttentionModel(models.Model):
                 activation=activation,
                 concat_heads=False,
                 dropout=dropout,
+                recurrent_dropout=recurrent_dropout,
             )
             for head, dim in zip(heads[:-1], dims[:-1])
         ]
@@ -79,6 +91,7 @@ class ScanRNNAttentionModel(models.Model):
                 activation=output_activation,
                 concat_heads=concat_heads,
                 dropout=dropout,
+                recurrent_dropout=recurrent_dropout,
             )
         )
         self.scans = tf.keras.models.Sequential(layers)
