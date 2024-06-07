@@ -323,3 +323,151 @@ class Attention(layers.Layer):
         if self.return_attention:
             return O, A_soft
         return O
+
+
+@tf.keras.utils.register_keras_serializable("RNNAttention")
+class LinearSelfAttentionRNN(DropCell, layers.Layer):
+    """
+    Implementation of https://arxiv.org/abs/2006.16236 :
+
+                Transformers are RNNs:
+    Fast Autoregressive Transformers with Linear Attention
+    """
+
+    def __init__(
+        self,
+        heads,
+        dims,
+        activation,
+        dropout=0,
+        recurrent_dropout=0,
+        initializer="glorot_uniform",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.heads = heads
+        self.dims = dims
+        self.elu = activations.get("elu")
+        self.state_size = [
+            tf.TensorShape([heads, dims, dims]),  # num
+            tf.TensorShape([heads, dims]),  # den
+        ]
+        self.output_size = tf.TensorShape([dims])
+        self.activation = activations.get(activation)
+        self.dropout = min(max(0, dropout), 1)
+        self.recurrent_dropout = min(max(0, recurrent_dropout), 1)
+        self.initializer = initializer
+
+    def build(self, input_shape):
+        i = input_shape[-1]
+        self.attn_kernel = self.add_weight(
+            name="kvq_kernel",
+            shape=(i, self.heads, self.dims, 3),
+            initializer=self.initializer,
+        )
+        self.out_kernel = self.add_weight(
+            name="out_kernel",
+            shape=(self.dims, self.heads, self.dims),
+            initializer=self.initializer,
+        )
+
+    @tf.function
+    def call(self, inputs, states, training):
+        prev_num, prev_den = states
+        kvq = tf.einsum("bi,ihok->bhok", inputs, self.attn_kernel)
+        if self.dropout > 0:
+            kvq_drop = self.get_dropout_mask_for_cell(
+                inputs=kvq, training=training, count=1
+            )
+            kvq = kvq * kvq_drop
+        k, v, q = tf.split(kvq, 3, -1)
+        k, v, q = k[..., 0], v[..., 0], q[..., 0]
+        k, q = self.elu(k) + 1.0, self.elu(q) + 1.0
+        num, den = self.recurrence(k, v, prev_num, prev_den)
+        s = tf.einsum("bhd,bhdm->bhm", q, num)  # BHD
+        z = tf.einsum("bhd,bhd->bh", q, den)
+        v = s / z[..., None]
+        y = tf.einsum("bhm,mho->bo", v, self.out_kernel)
+        if self.recurrent_dropout > 0:
+            y_mask = self.get_recurrent_dropout_mask_for_cell(
+                inputs=y, training=training, count=1
+            )
+            y = y * y_mask
+        return y, [num, den]
+
+    def recurrence(self, k, v, prev_num, prev_den):
+        kv_score = tf.einsum("bhd,bhm->bhdm", k, v)
+        num = prev_num + kv_score
+        den = prev_den + k
+        return num, den
+
+
+@tf.keras.utils.register_keras_serializable("RNNAttention")
+class LinearSelfAttention(DropCell, layers.Layer):
+    """
+    Implementation of https://arxiv.org/abs/2006.16236 :
+
+                Transformers are RNNs:
+    Fast Autoregressive Transformers with Linear Attention
+    """
+
+    def __init__(
+        self,
+        heads,
+        dim,
+        activation,
+        dropout=0,
+        recurrent_dropout=0,
+        initializer="glorot_uniform",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.heads = heads
+        self.dim = dim
+        self.elu = activations.get("elu")
+        self.state_size = [
+            tf.TensorShape([heads, dim, dim]),  # num
+            tf.TensorShape([heads, dim]),  # den
+        ]
+        self.output_size = tf.TensorShape([dim])
+        self.activation = activations.get(activation)
+        self.dropout = min(max(0, dropout), 1)
+        self.recurrent_dropout = min(max(0, recurrent_dropout), 1)
+        self.initializer = initializer
+
+    def build(self, input_shape):
+        i = input_shape[-1]
+        self.attn_kernel = self.add_weight(
+            name="kvq_kernel",
+            shape=(i, self.heads, self.dim, 3),
+            initializer=self.initializer,
+        )
+        self.out_kernel = self.add_weight(
+            name="out_kernel",
+            shape=(self.dim, self.heads, self.dim),
+            initializer=self.initializer,
+        )
+
+    @tf.function
+    def call(self, inputs, training):
+        kvq = tf.einsum("bti,ihok->bthok", inputs, self.attn_kernel)
+        if self.dropout > 0:
+            kvq_drop = self.get_dropout_mask_for_cell(
+                inputs=kvq, training=training, count=1
+            )
+            kvq = kvq * kvq_drop
+        k, v, q = tf.split(kvq, 3, -1)
+        k, v, q = k[..., 0], v[..., 0], q[..., 0]
+        k, q = self.elu(k) + 1.0, self.elu(q) + 1.0
+
+        kv = tf.einsum("bthd,bthm->bhdm", k, v)
+        z = tf.einsum("bthd,bhd->bth", q, tf.reduce_sum(k, axis=1))
+        s = tf.einsum("bthd,bhdm->bthm", q, kv)
+        v = s / z[..., None]
+        y = self.activation(tf.einsum("bthm,mho->bto", v, self.out_kernel))
+        if self.recurrent_dropout > 0:
+            y_mask = self.get_recurrent_dropout_mask_for_cell(
+                inputs=y, training=training, count=1
+            )
+            y = y * y_mask
+        return y
