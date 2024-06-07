@@ -6,14 +6,17 @@ from src.layers import (
     Attention,
     AttentionRNNCell,
     ScanAssociativeRNNAttention,
+    LinearSelfAttentionRNN,
+    LinearSelfAttention,
 )
 
 
+@tf.keras.utils.register_keras_serializable("RNNAttention")
 class AttentionRNN(models.Model):
     def __init__(
         self,
-        heads: List,
-        dims: List,
+        heads: List[int],
+        dims: List[int],
         activation="silu",
         output_activation="linear",
         concat_heads=False,
@@ -21,17 +24,19 @@ class AttentionRNN(models.Model):
         return_state=False,
         dropout=0.1,
         recurrent_dropout=0.01,
-        causal=False,
+        initializer="glorot_uniform",
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.dims = dims
         self.heads = heads
         self.activation = activation
-        cell = AttentionRNNCell
 
+        cell = AttentionRNNCell
         stacked = [
-            cell(h, d, activation, concat_heads, dropout, recurrent_dropout)
+            cell(
+                h, d, activation, concat_heads, dropout, recurrent_dropout, initializer
+            )
             for h, d in zip(heads[:-1], dims[:-1])
         ]
         stacked.append(
@@ -42,6 +47,7 @@ class AttentionRNN(models.Model):
                 concat_heads,
                 dropout,
                 recurrent_dropout,
+                initializer,
             )
         )
         stackedCell = tf.keras.layers.StackedRNNCells(stacked)
@@ -56,19 +62,21 @@ class AttentionRNN(models.Model):
         return self.rnn(inputs, training=training)
 
 
+@tf.keras.utils.register_keras_serializable("RNNAttention")
 class ScanRNNAttentionModel(models.Model):
     def __init__(
         self,
-        heads: List,
-        dims: List,
+        heads: List[int],
+        dims: List[int],
         activation="silu",
         output_activation="linear",
         concat_heads=False,
         dropout=0.1,
         recurrent_dropout=0.01,
+        initializer="glorot_uniform",
         **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
         assert len(heads) == len(
             dims
         ), f"len of heads and dims must be equal, but are heads:{len(heads)} dims: {len(dims)}"
@@ -81,6 +89,7 @@ class ScanRNNAttentionModel(models.Model):
                 concat_heads=False,
                 dropout=dropout,
                 recurrent_dropout=recurrent_dropout,
+                initializer=initializer,
             )
             for head, dim in zip(heads[:-1], dims[:-1])
         ]
@@ -92,6 +101,16 @@ class ScanRNNAttentionModel(models.Model):
                 concat_heads=concat_heads,
                 dropout=dropout,
                 recurrent_dropout=recurrent_dropout,
+                initializer=initializer,
+            )
+        )
+        self.scans = tf.keras.models.Sequential(layers)
+
+    def call(self, inputs, training):
+        h = self.scans(inputs, training=training)
+        return h
+
+
             )
         )
         self.scans = tf.keras.models.Sequential(layers)
@@ -100,6 +119,7 @@ class ScanRNNAttentionModel(models.Model):
         return self.scans(inputs, training)
 
 
+@tf.keras.utils.register_keras_serializable("RNNAttention")
 class AttentionModel(models.Model):
     def __init__(
         self, heads, dims, activation, output_activation, dropout, causal=True, **kwargs
@@ -119,3 +139,102 @@ class AttentionModel(models.Model):
 
     def call(self, inputs, training):
         return self.attn(inputs, training)
+
+
+@tf.keras.utils.register_keras_serializable("RNNAttention")
+class LinearRNNAttentionModel(models.Model):
+    def __init__(
+        self,
+        heads: List[int],
+        dims: List[int],
+        activation="silu",
+        output_activation="linear",
+        concat_heads=False,
+        dropout=0.1,
+        recurrent_dropout=0.01,
+        return_state=False,
+        return_sequences=True,
+        initializer="glorot_uniform",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        assert len(heads) == len(
+            dims
+        ), f"len of heads and dims must be equal, but are heads:{len(heads)} dims: {len(dims)}"
+
+        stacked = [
+            LinearSelfAttentionRNN(
+                heads=head,
+                dims=dim,
+                activation=activation,
+                dropout=dropout,
+                recurrent_dropout=recurrent_dropout,
+                initializer=initializer,
+            )
+            for head, dim in zip(heads[:-1], dims[:-1])
+        ]
+        stacked.append(
+            LinearSelfAttentionRNN(
+                heads=heads[-1],
+                dims=dims[-1],
+                activation=output_activation,
+                dropout=dropout,
+                recurrent_dropout=recurrent_dropout,
+                initializer=initializer,
+            )
+        )
+        stackedCell = tf.keras.layers.StackedRNNCells(stacked)
+        self.rnn = layers.RNN(
+            stackedCell,
+            return_sequences=return_sequences,
+            return_state=return_state,
+        )
+
+    def call(self, inputs, training):
+        return self.rnn(inputs, training=training)
+
+
+@tf.keras.utils.register_keras_serializable("RNNAttention")
+class LinearAttentionModel(models.Model):
+    def __init__(
+        self,
+        heads: List[int],
+        dims: List[int],
+        activation="silu",
+        output_activation="linear",
+        dropout=0.1,
+        recurrent_dropout=0.01,
+        initializer="glorot_uniform",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        assert len(heads) == len(
+            dims
+        ), f"len of heads and dims must be equal, but are heads:{len(heads)} dims: {len(dims)}"
+
+        layers = [
+            LinearSelfAttention(
+                heads=head,
+                dims=dim,
+                activation=activation,
+                dropout=dropout,
+                recurrent_dropout=recurrent_dropout,
+                initializer=initializer,
+            )
+            for head, dim in zip(heads[:-1], dims[:-1])
+        ]
+        layers.append(
+            LinearSelfAttention(
+                heads=heads[-1],
+                dims=dims[-1],
+                activation=output_activation,
+                dropout=dropout,
+                recurrent_dropout=recurrent_dropout,
+                initializer=initializer,
+            )
+        )
+        self.attn = tf.keras.models.Sequential(layers)
+
+    def call(self, inputs, training):
+        h = self.attn(inputs, training=training)
+        return h
