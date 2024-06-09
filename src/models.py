@@ -111,14 +111,6 @@ class ScanRNNAttentionModel(models.Model):
         return h
 
 
-            )
-        )
-        self.scans = tf.keras.models.Sequential(layers)
-
-    def call(self, inputs, training):
-        return self.scans(inputs, training)
-
-
 @tf.keras.utils.register_keras_serializable("RNNAttention")
 class AttentionModel(models.Model):
     def __init__(
