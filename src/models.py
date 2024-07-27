@@ -6,8 +6,10 @@ from src.layers import (
     Attention,
     AttentionRNNCell,
     ScanAssociativeRNNAttention,
+    ScanAssociativeRNNSelfAttention,
     LinearSelfAttentionRNN,
     LinearSelfAttention,
+    Residual,
 )
 
 
@@ -190,43 +192,59 @@ class LinearRNNAttentionModel(models.Model):
 class LinearAttentionModel(models.Model):
     def __init__(
         self,
-        heads: List[int],
-        dims: List[int],
+        heads: int,
+        dims: int,
+        output_dim: int,
+        layers: int,
         activation="silu",
         output_activation="linear",
         dropout=0.1,
         recurrent_dropout=0.01,
         initializer="glorot_uniform",
+        norm_type="layer_norm",
         **kwargs,
     ):
         super().__init__(**kwargs)
-        assert len(heads) == len(
+        """assert len(heads) == len(
             dims
-        ), f"len of heads and dims must be equal, but are heads:{len(heads)} dims: {len(dims)}"
+        ), f"len of heads and dims must be equal, but are heads:{len(heads)} dims: {len(dims)}"""
 
-        layers = [
+        layers_ = []
+        for i in range(layers - 1):
+            if i != 0:
+                layer = Residual(
+                    LinearSelfAttention(
+                        heads=heads,
+                        dims=dims,
+                        activation=activation,
+                        dropout=dropout,
+                        recurrent_dropout=recurrent_dropout,
+                        initializer=initializer,
+                    ),
+                    norm_type=norm_type,
+                )
+            else:
+                layer = LinearSelfAttention(
+                    heads=heads,
+                    dims=dims,
+                    activation=activation,
+                    dropout=dropout,
+                    recurrent_dropout=recurrent_dropout,
+                    initializer=initializer,
+                )
+            layers_.append(layer)
+
+        layers_.append(
             LinearSelfAttention(
-                heads=head,
-                dims=dim,
-                activation=activation,
-                dropout=dropout,
-                recurrent_dropout=recurrent_dropout,
-                initializer=initializer,
-            )
-            for head, dim in zip(heads[:-1], dims[:-1])
-        ]
-        layers.append(
-            LinearSelfAttention(
-                heads=heads[-1],
-                dims=dims[-1],
+                heads=heads,
+                dims=output_dim,
                 activation=output_activation,
                 dropout=dropout,
                 recurrent_dropout=recurrent_dropout,
                 initializer=initializer,
             )
         )
-        self.attn = tf.keras.models.Sequential(layers)
+        self.attn = tf.keras.models.Sequential(layers_)
 
     def call(self, inputs, training):
-        h = self.attn(inputs, training=training)
-        return h
+        return self.attn(inputs)
