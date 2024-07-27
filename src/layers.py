@@ -12,6 +12,7 @@ else:
 import numpy as np
 
 
+@tf.keras.utils.register_keras_serializable("RNNAttention")
 class AttentionRNNCell(DropCell, layers.Layer):
     def __init__(
         self,
@@ -105,7 +106,7 @@ class AttentionRNNCell(DropCell, layers.Layer):
         # Query-Key inner product
         s = tf.einsum("hq,bhq->bh", query, key)  # BH
         # Update max for stable soft-max
-        curr_max = tf.maximum(prev_max, s)  # BH
+        curr_max = tf.stop_gradient(tf.maximum(prev_max, s))  # BH
         exp_max_diff = tf.math.exp(prev_max - curr_max)  # BH
         # Subtract max to stabilize
         sm = tf.math.exp(s - curr_max)  # BH
@@ -146,9 +147,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
             initializer=self.initializer,
         )
         self.q_kernel = self.add_weight(
-            name="q_kernel", 
-            shape=(self.heads, self.dim), 
-            initializer=self.initializer
+            name="q_kernel", shape=(self.heads, self.dim), initializer=self.initializer
         )
 
     @staticmethod
@@ -162,7 +161,7 @@ class ScanAssociativeRNNAttention(layers.Layer):
         Returns:
             tf.Tensor: max of shape (B, T, H, D)
         """
-        return tf.maximum(a, b)
+        return tf.stop_gradient(tf.maximum(a, b))
 
     def u_aUb(self, ua, ma, ub, mb):
         """Union operation for combining denominators
@@ -298,7 +297,7 @@ class Attention(layers.Layer):
             name="kvq_kernel", shape=(i, self.heads, self.dims, 3)
         )
         self.out_kernel = self.add_weight(
-            name="kvq_kernel", shape=(self.dims, self.heads, self.dims)
+            name="out_kernel", shape=(self.dims, self.heads, self.dims)
         )
 
     @tf.function
@@ -324,11 +323,30 @@ class Attention(layers.Layer):
             return O, A_soft
         return O
 
+    def get_config(self):
+        config = {
+            "dropout": self.dropout,
+            "heads": self.attn_heads,
+            "dims": self.dims,
+            "activation": (
+                self.activation
+                if type(self.activation) is str
+                else tf.keras.utils.serialize_keras_object(self.activation)
+            ),
+            "initializer": (
+                self.initializer
+                if type(self.initializer) is str
+                else tf.keras.utils.serialize_keras_object(self.initializer)
+            ),
+        }
+        base_config = super().get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 @tf.keras.utils.register_keras_serializable("RNNAttention")
 class LinearSelfAttentionRNN(DropCell, layers.Layer):
     """
-    Implementation of https://arxiv.org/abs/2006.16236 :
+    Implementation of https://arxiv.org/abs/2006.16236
 
                 Transformers are RNNs:
     Fast Autoregressive Transformers with Linear Attention
@@ -387,7 +405,7 @@ class LinearSelfAttentionRNN(DropCell, layers.Layer):
         s = tf.einsum("bhd,bhdm->bhm", q, num)  # BHD
         z = tf.einsum("bhd,bhd->bh", q, den)
         v = s / z[..., None]
-        y = tf.einsum("bhm,mho->bo", v, self.out_kernel)
+        y = self.activation(tf.einsum("bhm,mho->bo", v, self.out_kernel))
         if self.recurrent_dropout > 0:
             y_mask = self.get_recurrent_dropout_mask_for_cell(
                 inputs=y, training=training, count=1
@@ -401,11 +419,31 @@ class LinearSelfAttentionRNN(DropCell, layers.Layer):
         den = prev_den + k
         return num, den
 
+    def get_config(self):
+        config = {
+            "dropout": self.dropout,
+            "recurrent_dropout": self.recurrent_dropout,
+            "heads": self.attn_heads,
+            "dims": self.dims,
+            "activation": (
+                self.activation
+                if type(self.activation) is str
+                else tf.keras.utils.serialize_keras_object(self.activation)
+            ),
+            "initializer": (
+                self.initializer
+                if type(self.initializer) is str
+                else tf.keras.utils.serialize_keras_object(self.initializer)
+            ),
+        }
+        base_config = super().get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 @tf.keras.utils.register_keras_serializable("RNNAttention")
 class LinearSelfAttention(DropCell, layers.Layer):
     """
-    Implementation of https://arxiv.org/abs/2006.16236 :
+    Implementation of https://arxiv.org/abs/2006.16236
 
                 Transformers are RNNs:
     Fast Autoregressive Transformers with Linear Attention
@@ -414,7 +452,7 @@ class LinearSelfAttention(DropCell, layers.Layer):
     def __init__(
         self,
         heads,
-        dim,
+        dims,
         activation,
         dropout=0,
         recurrent_dropout=0,
@@ -423,13 +461,13 @@ class LinearSelfAttention(DropCell, layers.Layer):
     ):
         super().__init__(**kwargs)
         self.heads = heads
-        self.dim = dim
+        self.dims = dims
         self.elu = activations.get("elu")
         self.state_size = [
-            tf.TensorShape([heads, dim, dim]),  # num
-            tf.TensorShape([heads, dim]),  # den
+            tf.TensorShape([heads, dims, dims]),  # num
+            tf.TensorShape([heads, dims]),  # den
         ]
-        self.output_size = tf.TensorShape([dim])
+        self.output_size = tf.TensorShape([dims])
         self.activation = activations.get(activation)
         self.dropout = min(max(0, dropout), 1)
         self.recurrent_dropout = min(max(0, recurrent_dropout), 1)
@@ -439,12 +477,12 @@ class LinearSelfAttention(DropCell, layers.Layer):
         i = input_shape[-1]
         self.attn_kernel = self.add_weight(
             name="kvq_kernel",
-            shape=(i, self.heads, self.dim, 3),
+            shape=(i, self.heads, self.dims, 3),
             initializer=self.initializer,
         )
         self.out_kernel = self.add_weight(
             name="out_kernel",
-            shape=(self.dim, self.heads, self.dim),
+            shape=(self.dims, self.heads, self.dims),
             initializer=self.initializer,
         )
 
@@ -471,3 +509,56 @@ class LinearSelfAttention(DropCell, layers.Layer):
             )
             y = y * y_mask
         return y
+
+    def get_config(self):
+        config = {
+            "dropout": self.dropout,
+            "recurrent_dropout": self.recurrent_dropout,
+            "heads": self.attn_heads,
+            "dims": self.dims,
+            "activation": (
+                self.activation
+                if type(self.activation) is str
+                else tf.keras.utils.serialize_keras_object(self.activation)
+            ),
+            "initializer": (
+                self.initializer
+                if type(self.initializer) is str
+                else tf.keras.utils.serialize_keras_object(self.initializer)
+            ),
+        }
+        base_config = super().get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+@tf.keras.utils.register_keras_serializable("RNNAttention")
+class Residual(layers.Layer):
+    def __init__(self, layer, norm_type=None, **kwargs):
+        super().__init__(**kwargs)
+        norms = {
+            "layer_norm": (layers.LayerNormalization, {}),
+            "rms_norm": (layers.LayerNormalization, {"rms_scaling": True}),
+            "batch_norm": (layers.BatchNormalization, {}),
+            None: lambda x, **kwargs: x,
+        }
+        self.layer = layer
+        self.norm_type = norm_type
+        ln = norms[norm_type]
+        self.layer_norm = ln[0](**ln[1])
+
+    def build(self, input_shape):
+        self.layer.build(input_shape)
+
+    def call(self, inputs, training):
+        res = inputs + self.layer(inputs, training)
+        if self.norm_type is not None:
+            res = self.layer_norm(res)
+        return res
+
+    def get_config(self):
+        config = {
+            "layer": tf.keras.utils.serialize_keras_object(self.layer),
+            "norm_type": self.norm_type,
+        }
+        base_config = super().get_config()
+        return dict(list(base_config.items()) + list(config.items()))
